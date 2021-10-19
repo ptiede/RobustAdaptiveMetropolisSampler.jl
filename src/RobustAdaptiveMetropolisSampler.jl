@@ -1,39 +1,50 @@
 module RobustAdaptiveMetropolisSampler
 
-using LinearAlgebra, Random, Distributions, PDMats, ProgressMeter
+using LinearAlgebra, StatsBase, Random, Distributions, PDMats, ProgressMeter
 
-export RAM_sample
+export RAM, sample
 
-# The following methods cover different ways to pass in a co-variance matrix
-function RAM_sample(logtarget, x0::AbstractVector{<:Number}, M0::AbstractMatrix{<:Real}, n::Int; kwargs...)
-    return RAM_sample(logtarget, x0, PDMat(M0), n; kwargs...)
+Base.@kwdef struct RAM{P, N<:Number, V<:AbstractVector{N}, C<:AbstractPDMat}
+    x::V
+    M::C
+    opt_α::Float64 = 0.234
+    γ::Float64 = 0.667
+    q::P = Normal()
+    step::Int = 0
 end
 
-function RAM_sample(logtarget, x0::AbstractVector{<:Number}, M0::AbstractVector{<:Real}, n::Int; kwargs...)
-    return RAM_sample(logtarget, x0, PDiagMat(abs2.(M0)), n; kwargs...)
+function RAM(x::AbstractVector{<:Number}, M::AbstractMatrix{<:Real}; kwargs...)
+    return RAM(x=x, M=PDMat(M); kwargs...)
 end
 
-function RAM_sample(logtarget, x0::AbstractVector{<:Number}, M0::Diagonal{<:Real}, n::Int; kwargs...)
-    return RAM_sample(logtarget, x0, PDiagMat(diag(M0)), n; kwargs...)
+function RAM(x::AbstractVector{<:Number}, M::AbstractVector{<:Real}; kwargs...)
+    return RAM(x=x, M=PDiagMat(abs2.(M)); kwargs...)
 end
 
-function RAM_sample(logtarget, x0::AbstractVector{<:Number}, M0::Real, n::Int; kwargs...)
-    return RAM_sample(logtarget, x0, ScalMat(length(x0), abs2(M0)), n; kwargs...)
+function RAM(x::AbstractVector{<:Number}, M::Diagonal{<:Real}; kwargs...)
+    return RAM(x=x, M=PDiagMat(diag(M)); kwargs...)
+end
+
+function RAM(x::AbstractVector{<:Number}, M::Real; kwargs...)
+    return RAM(x=x, M=ScalMat(length(x), abs2(M)); kwargs...)
 end
 
 # Actual sampling code
 
-function RAM_sample(
+function StatsBase.sample(
         logtarget,
-        x0::AbstractVector{<:Number},
-        M0::AbstractPDMat,
+        smplr::RAM,
         n::Int;
-        opt_α=0.234,
-        γ=2 / 3,
-        q=Normal(),
         show_progress::Bool=true,
         output_log_probability_x::Bool=false
     )
+
+    x0 = smplr.x
+    M0 = smplr.M
+    opt_α = smplr.opt_α
+    γ = smplr.γ
+    step0 = smplr.step
+    q = smplr.q
 
     length(x0) == size(M0, 1) || error("Covariance matrix M0 must match size of x0.")
     n > 0 || error("n must be larger than 0.")
@@ -62,10 +73,13 @@ function RAM_sample(
 
     # This is a pre-allocated vector used in the loop
     scaled_proposal_vector = Vector{Float64}(undef, d)
-
+    step = step0
     for i in 1:n
         # Step R1
         rand!(q, u)
+
+        # Increment step counter
+        step += 1
 
         y[:] .= x .+ mul!(scaled_proposal_vector, s.L, u)
 
@@ -85,7 +99,7 @@ function RAM_sample(
         # Step R3
 
         # This is taken from the second paragraph of section 5
-        η = min(1, d * i^-γ)
+        η = min(1, d * step^-γ)
 
         # Compute the new covariance matrix
         M = s.L * (I + η * (α - opt_α) * (u * u') / norm(u)^2 ) * s.L'
@@ -102,9 +116,10 @@ function RAM_sample(
     return (
         chain = output_chain,
         acceptance_rate = stats_accepted_values / n,
-        M = s.L * s.L',
+        state = RAM(x=x, M=PDMat(s.L * s.L'), opt_α = opt_α, γ = γ, q = q, step = step),
         log_probabilities_x = output_log_probability_x ? log_probabilities_x : nothing
     )
 end
+
 
 end
