@@ -116,7 +116,7 @@ function StatsBase.sample(
     return (
         chain = output_chain,
         acceptance_rate = stats_accepted_values / n,
-        state = RAM(x=x, M=PDMat(s.L * s.L'), opt_α = opt_α, γ = γ, q = q, step = step),
+        state = RAM(x=x, M=PDMat(Symmetric(s.L * s.L')), opt_α = opt_α, γ = γ, q = q, step = step),
         log_probabilities_x = output_log_probability_x ? log_probabilities_x : nothing
     )
 end
